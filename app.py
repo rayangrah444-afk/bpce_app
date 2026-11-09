@@ -24,7 +24,8 @@
 
  Architecture
  ------------
-     0. Configuration & charte graphique (CSS injecté, thème Plotly)
+     0. Charte graphique prune Groupe BPCE : thème Streamlit auto-installé
+        (.streamlit/config.toml), CSS anti « ton sur ton », thème Plotly dédié
      1. Référentiels : zones, pays, univers de cibles M&A, profils de secours
      2. Couche données « fail-safe » (World Bank, FMI, FRED, BCE, Yahoo Finance)
         -> chaque source : try/except spécifiques + timeout + cache 1 h
@@ -45,6 +46,7 @@ import math
 import zlib
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable
 from xml.sax.saxutils import escape
 
@@ -83,16 +85,24 @@ except ImportError:  # pragma: no cover
 
 APP_NAME = "BPCE International Strategy Hub"
 
-BPCE_RED = "#C8102E"
-BPCE_NAVY = "#002B49"
-BPCE_WHITE = "#FFFFFF"
-BPCE_ANTHRACITE = "#1F2421"
-BPCE_LIGHT = "#F4F6F8"
-BPCE_SLATE = "#5B7F95"
-BPCE_MIST = "#A9BCCB"
+# Palette institutionnelle Groupe BPCE (tons prune / violet)
+PRUNE = "#4A2845"          # couleur emblématique : éléments forts, onglets actifs, boutons
+PRUNE_DARK = "#351C32"     # barre latérale, bandeaux
+PRUNE_DEEP = "#2C1A2B"     # titres
+ACCENT = "#8E3B82"         # accent secondaire (projections, séries comparées)
+MAUVE = "#B48AB0"          # séries tertiaires
+TINT = "#F3EEF2"           # fonds teintés prune très clairs
+GOLD = "#B8862B"           # surbrillance « terminal » (usage parcimonieux)
+INK = "#1F2421"            # texte courant
+MUTED = "#55505A"          # texte secondaire (contraste AA sur blanc)
+SLATE = "#64748B"
+MIST = "#CBD5E1"
+BG = "#F8F9FA"
+BORDER = "#E2E8F0"
+WHITE = "#FFFFFF"
 
-RISK_COLORS = {"Faible": "#2E8B57", "Modéré": "#E0A100",
-               "Élevé": "#E36414", "Critique": BPCE_RED}
+RISK_COLORS = {"Faible": "#2F855A", "Modéré": "#B7791F",
+               "Élevé": "#C05621", "Critique": "#B42318"}
 
 HTTP_TIMEOUT = 6           # secondes par requête HTTP
 YF_TIMEOUT = 15            # secondes max pour l'ensemble des appels Yahoo
@@ -113,134 +123,279 @@ st.set_page_config(
 )
 
 
+THEME_TOML = """# Généré automatiquement par BPCE International Strategy Hub
+[theme]
+base = "light"
+primaryColor = "#4A2845"
+backgroundColor = "#F8F9FA"
+secondaryBackgroundColor = "#F3EEF2"
+textColor = "#1F2421"
+borderColor = "#E2E8F0"
+linkColor = "#8E3B82"
+font = "Inter, 'Segoe UI', Roboto, sans-serif"
+baseRadius = "8px"
+dataframeHeaderBackgroundColor = "#F3EEF2"
+dataframeBorderColor = "#E2E8F0"
+chartCategoricalColors = ["#4A2845", "#8E3B82", "#B48AB0", "#64748B", "#B8862B"]
+
+[theme.sidebar]
+backgroundColor = "#351C32"
+secondaryBackgroundColor = "#4A2845"
+textColor = "#FFFFFF"
+borderColor = "#5E3A58"
+"""
+
+
+def ensure_theme_config() -> bool:
+    """Installe le thème BPCE dans `.streamlit/config.toml` (s'il est absent).
+
+    Pourquoi : en mode sombre (OS ou navigateur), Streamlit passe ses widgets en
+    texte clair ; combiné à un fond clair, cela crée du « ton sur ton ». Le thème
+    `base = "light"` force un rendu clair cohérent, y compris pour les éléments
+    dessinés en canvas (tableaux) que le CSS ne peut pas atteindre. Streamlit
+    recharge ce fichier à chaud : aucun redémarrage n'est nécessaire.
+    Un fichier existant n'est jamais écrasé.
+    """
+    path = Path.cwd() / ".streamlit" / "config.toml"
+    if path.exists():
+        return False
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(THEME_TOML, encoding="utf-8")
+        return True
+    except OSError:
+        return False
+
+
 def inject_css() -> None:
-    """Injecte la feuille de style sur-mesure (charte Groupe BPCE)."""
+    """Feuille de style « terminal bancaire privé » — charte prune Groupe BPCE.
+
+    Le CSS force explicitement couleurs de fond ET de texte de chaque composant :
+    le rendu reste lisible quel que soit le thème (clair/sombre) du poste client.
+    """
     st.markdown(
         f"""
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap');
 
-        html, body, [class*="css"], .stMarkdown, .stText, button, input, select, textarea {{
-            font-family: 'Inter', 'Segoe UI', 'Roboto', sans-serif !important;
+        /* ================= Base & typographie ================= */
+        html, body, .stApp, button, input, select, textarea {{
+            font-family: 'Inter', 'Segoe UI', 'Roboto', sans-serif;
         }}
-        [data-testid="stAppViewContainer"] {{ background: {BPCE_LIGHT}; }}
-        [data-testid="stHeader"] {{ background: transparent; }}
-        .block-container {{ padding-top: 1.6rem; padding-bottom: 3rem; max-width: 1500px; }}
-        h1, h2, h3, h4 {{ color: {BPCE_NAVY}; font-weight: 700; letter-spacing: -0.01em; }}
+        .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {{
+            background: {BG} !important; color: {INK} !important;
+        }}
+        [data-testid="stHeader"] {{ background: transparent !important; height: 2.6rem; }}
+        [data-testid="stHeader"] * {{ color: {PRUNE_DEEP} !important; }}
+        .block-container {{ padding-top: 3.2rem; padding-bottom: 3rem; max-width: 1520px; }}
 
-        /* ---------- Sidebar bleu nuit ---------- */
+        [data-testid="stMain"] h1, [data-testid="stMain"] h2, [data-testid="stMain"] h3,
+        [data-testid="stMain"] h4, [data-testid="stMain"] h5 {{
+            color: {PRUNE_DEEP} !important; font-weight: 700; letter-spacing: -0.01em;
+        }}
+        [data-testid="stMain"] p, [data-testid="stMain"] li, [data-testid="stMain"] label,
+        [data-testid="stMain"] [data-testid="stMarkdownContainer"],
+        [data-testid="stMain"] [data-testid="stWidgetLabel"] *,
+        [data-testid="stMain"] td, [data-testid="stMain"] th {{
+            color: {INK};
+        }}
+        [data-testid="stMain"] [data-testid="stWidgetLabel"] p {{
+            color: {PRUNE_DEEP} !important; font-weight: 600; font-size: .86rem;
+        }}
+        [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] * {{ color: {MUTED} !important; }}
+        [data-testid="stMain"] table {{ border-collapse: collapse; background: {WHITE}; }}
+        [data-testid="stMain"] th {{ background: {TINT} !important; color: {PRUNE_DEEP} !important;
+                                      border: 1px solid {BORDER} !important; }}
+        [data-testid="stMain"] td {{ border: 1px solid {BORDER} !important; color: {INK} !important; }}
+
+        /* ================= Champs de saisie (zone principale) ================= */
+        [data-testid="stMain"] [data-baseweb="select"] > div,
+        [data-testid="stMain"] [data-baseweb="input"],
+        [data-testid="stMain"] [data-baseweb="base-input"],
+        [data-testid="stMain"] input, [data-testid="stMain"] textarea {{
+            background: {WHITE} !important; color: {INK} !important;
+            border-color: {BORDER} !important; -webkit-text-fill-color: {INK} !important;
+        }}
+        [data-testid="stMain"] [data-baseweb="select"] * {{ color: {INK}; }}
+        [data-testid="stMain"] [data-baseweb="select"] svg {{ fill: {PRUNE} !important; }}
+        [data-testid="stMain"] input::placeholder {{ color: #8A8490 !important; -webkit-text-fill-color: #8A8490 !important; }}
+        [data-testid="stNumberInput"] button {{ background: {TINT} !important; color: {PRUNE} !important; border: none !important; }}
+        [data-testid="stNumberInput"] button:hover {{ background: {PRUNE} !important; color: {WHITE} !important; }}
+        [data-baseweb="tag"] {{ background: {PRUNE} !important; }}
+        [data-baseweb="tag"] * {{ color: {WHITE} !important; }}
+        [data-testid="stSliderThumbValue"] p, [data-testid="stSliderThumbValue"] {{ color: {PRUNE} !important; font-weight: 700; }}
+        [data-testid="stSliderTickBar"] p {{ color: {MUTED} !important; }}
+        [data-testid="stMain"] [data-testid="stCheckbox"] p,
+        [data-testid="stMain"] [data-testid="stRadioOption"] p {{ color: {INK} !important; }}
+
+        /* Listes déroulantes (rendues hors du conteneur principal) */
+        [data-baseweb="popover"] ul, [data-baseweb="popover"] [role="listbox"],
+        [data-baseweb="menu"] {{ background: {WHITE} !important; border: 1px solid {BORDER}; }}
+        [data-baseweb="popover"] li, [data-baseweb="popover"] [role="option"],
+        [data-baseweb="popover"] li * {{ color: {INK} !important; background: {WHITE}; }}
+        [data-baseweb="popover"] li:hover, [data-baseweb="popover"] [aria-selected="true"] {{
+            background: {TINT} !important; }}
+
+        /* Expanders, alertes, toasts, progress */
+        [data-testid="stMain"] [data-testid="stExpander"] details {{
+            background: {WHITE} !important; border: 1px solid {BORDER} !important; border-radius: 10px;
+        }}
+        [data-testid="stMain"] [data-testid="stExpander"] summary,
+        [data-testid="stMain"] [data-testid="stExpander"] summary * {{ color: {PRUNE_DEEP} !important; font-weight: 600; }}
+        [data-testid="stAlertContainer"] {{ background: {TINT} !important; border-left: 4px solid {PRUNE};
+                                            color: {INK} !important; }}
+        [data-testid="stAlertContainer"] * {{ color: {INK} !important; }}
+        [data-testid="stToast"] {{ background: {WHITE} !important; border: 1px solid {BORDER};
+                                   box-shadow: 0 8px 24px rgba(53,28,50,.18); }}
+        [data-testid="stToast"] * {{ color: {INK} !important; }}
+        [data-testid="stProgress"] p {{ color: {PRUNE_DEEP} !important; font-weight: 600; }}
+        [data-testid="stDataFrame"], [data-testid="stTable"] {{
+            border: 1px solid {BORDER}; border-radius: 10px; overflow: hidden; background: {WHITE};
+            box-shadow: 0 1px 3px rgba(53,28,50,.06);
+        }}
+
+        /* ================= Boutons ================= */
+        .stButton > button, .stDownloadButton > button {{
+            background: {WHITE} !important; color: {PRUNE} !important; border: 1px solid {PRUNE} !important;
+            font-weight: 600; border-radius: 8px; transition: all .18s ease;
+        }}
+        .stButton > button:hover, .stDownloadButton > button:hover {{
+            background: {TINT} !important; transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(74,40,69,.18);
+        }}
+        .stButton > button[kind="primary"], .stDownloadButton > button {{
+            background: linear-gradient(135deg, {PRUNE} 0%, {PRUNE_DARK} 100%) !important;
+            color: {WHITE} !important; border: none !important;
+        }}
+        .stButton > button[kind="primary"] *, .stDownloadButton > button * {{ color: {WHITE} !important; }}
+        .stButton > button[kind="primary"]:hover, .stDownloadButton > button:hover {{
+            background: linear-gradient(135deg, {ACCENT} 0%, {PRUNE} 100%) !important;
+            box-shadow: 0 8px 20px rgba(74,40,69,.35);
+        }}
+
+        /* ================= Onglets ================= */
+        .stTabs [data-baseweb="tab-list"] {{ gap: 4px; border-bottom: 1px solid {BORDER}; }}
+        .stTabs button[data-baseweb="tab"] {{
+            color: {MUTED} !important; font-weight: 600; padding: 8px 18px !important;
+            border-radius: 8px 8px 0 0; background: transparent; transition: all .18s;
+        }}
+        .stTabs [data-baseweb="tab"] *, .stTabs [data-baseweb="tab"] [data-testid="stMarkdownContainer"] {{
+            color: inherit !important; }}
+        .stTabs [data-baseweb="tab"]:hover {{ background: {TINT}; color: {PRUNE} !important; }}
+        .stTabs [aria-selected="true"], .stTabs [aria-selected="true"] * {{
+            color: {WHITE} !important; background: {PRUNE} !important; }}
+        .stTabs [data-baseweb="tab-highlight"] {{ background-color: {PRUNE} !important; height: 3px; }}
+        .stTabs [data-baseweb="tab-border"] {{ background-color: {BORDER} !important; }}
+
+        /* ================= Barre latérale prune ================= */
         [data-testid="stSidebar"] {{
-            background: linear-gradient(180deg, {BPCE_NAVY} 0%, #001A2E 100%);
-            border-right: 3px solid {BPCE_RED};
+            background: linear-gradient(180deg, {PRUNE_DARK} 0%, #24121F 100%) !important;
+            border-right: 1px solid #5E3A58;
         }}
-        [data-testid="stSidebar"] p, [data-testid="stSidebar"] label,
-        [data-testid="stSidebar"] span, [data-testid="stSidebar"] div,
-        [data-testid="stSidebar"] h1, [data-testid="stSidebar"] h2,
-        [data-testid="stSidebar"] h3, [data-testid="stSidebar"] small {{
-            color: #E8EEF3;
-        }}
+        [data-testid="stSidebar"] * {{ color: {WHITE} !important; }}
         [data-testid="stSidebar"] [data-baseweb="select"] > div {{
-            background: #FFFFFF; border-radius: 8px; border: none;
+            background: {PRUNE} !important; border: 1px solid #6E4A68 !important; border-radius: 8px;
         }}
-        [data-testid="stSidebar"] [data-baseweb="select"] * {{ color: {BPCE_NAVY} !important; }}
-        [data-testid="stSidebar"] [data-testid="stExpander"] {{
-            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+        [data-testid="stSidebar"] [data-baseweb="select"] svg {{ fill: {WHITE} !important; }}
+        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {{
+            font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 600;
+            color: #E9DDE7 !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stRadioOption"] {{
+            padding: 7px 10px; border-radius: 8px; margin-bottom: 2px; transition: background .15s;
+        }}
+        [data-testid="stSidebar"] [data-testid="stRadioOption"]:hover {{ background: rgba(255,255,255,.08); }}
+        [data-testid="stSidebar"] [data-testid="stRadioOption"][data-selected="true"] {{
+            background: rgba(255,255,255,.14); box-shadow: inset 3px 0 0 {MAUVE};
+        }}
+        [data-testid="stSidebar"] [data-testid="stExpander"] details {{
+            background: rgba(255,255,255,.05) !important; border: 1px solid rgba(255,255,255,.16) !important;
             border-radius: 10px;
         }}
-        [data-testid="stSidebar"] hr {{ border-color: rgba(255,255,255,0.15); }}
-
-        .brand-badge {{
-            background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15);
-            border-left: 5px solid {BPCE_RED}; border-radius: 10px;
-            padding: 14px 14px 12px 14px; margin-bottom: 14px;
+        [data-testid="stSidebar"] .stButton > button {{
+            background: rgba(255,255,255,.08) !important; border: 1px solid rgba(255,255,255,.3) !important;
         }}
-        .brand-badge .b1 {{ font-size: 0.72rem; letter-spacing: .18em; color: #FFB3BE !important;
-                           font-weight: 700; text-transform: uppercase; }}
-        .brand-badge .b2 {{ font-size: 1.12rem; font-weight: 800; color: #FFFFFF !important; line-height: 1.2; }}
-        .brand-badge .b3 {{ font-size: 0.74rem; color: {BPCE_MIST} !important; margin-top: 4px; }}
+        [data-testid="stSidebar"] .stButton > button:hover {{ background: rgba(255,255,255,.16) !important; }}
+        [data-testid="stSidebar"] hr {{ border-color: rgba(255,255,255,.14) !important; }}
+        [data-testid="stSidebarCollapseButton"] svg, [data-testid="stSidebarHeader"] svg {{ fill: {WHITE} !important; }}
 
-        .api-row {{ display:flex; justify-content:space-between; align-items:center;
-                    font-size: .8rem; padding: 3px 0; }}
-        .dot {{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }}
+        .brand {{ padding: 6px 2px 14px 2px; border-bottom: 1px solid rgba(255,255,255,.14); margin-bottom: 14px; }}
+        .brand .mark {{ display:inline-flex; align-items:center; justify-content:center; width:38px; height:38px;
+                        border-radius:9px; background:{WHITE}; color:{PRUNE} !important; font-weight:800;
+                        font-size:.66rem; letter-spacing:0; margin-right:10px; flex-shrink:0; }}
+        .brand .mark * {{ color:{PRUNE} !important; }}
+        .brand .row {{ display:flex; align-items:center; }}
+        .brand .t1 {{ font-size:.68rem; letter-spacing:.2em; text-transform:uppercase; color:#E3CFE0 !important; font-weight:700; }}
+        .brand .t2 {{ font-size:1.02rem; font-weight:800; line-height:1.15; }}
+        .side-h {{ font-size:.7rem; letter-spacing:.16em; text-transform:uppercase; font-weight:700;
+                   color:#D9C2D5 !important; margin: 8px 0 6px 0; }}
+        .api-row {{ display:flex; justify-content:space-between; align-items:center; font-size:.8rem; padding:4px 0;
+                    border-bottom: 1px dashed rgba(255,255,255,.1); }}
+        .dot {{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:7px; }}
 
-        /* ---------- Hero banner ---------- */
+        /* ================= Bandeau de module & ruban « terminal » ================= */
         .hero {{
-            background: linear-gradient(115deg, {BPCE_NAVY} 0%, #0B3D63 62%, {BPCE_RED} 150%);
-            border-radius: 14px; padding: 22px 28px; color: #fff; margin-bottom: 18px;
-            box-shadow: 0 6px 22px rgba(0,43,73,.18); position: relative; overflow: hidden;
+            background: {PRUNE_DARK}; border-radius: 12px 12px 0 0; padding: 20px 26px 18px 26px;
+            position: relative; overflow: hidden; border: 1px solid #4E2C49; border-bottom: none;
         }}
-        .hero:after {{ content:""; position:absolute; right:-60px; top:-60px; width:220px; height:220px;
-                      border-radius:50%; background: rgba(200,16,46,.25); }}
-        .hero .kicker {{ font-size:.75rem; letter-spacing:.2em; text-transform:uppercase; color:#FFB3BE; font-weight:700; }}
-        .hero .title {{ font-size:1.7rem; font-weight:800; margin: 2px 0 4px 0; color:#fff; }}
-        .hero .sub {{ font-size:.92rem; color:#D6E2EC; }}
+        .hero:before {{ content:""; position:absolute; left:0; top:0; bottom:0; width:5px; background:{MAUVE}; }}
+        .hero:after {{ content:""; position:absolute; right:-80px; top:-90px; width:260px; height:260px;
+                       border-radius:50%; background: radial-gradient(circle, rgba(180,138,176,.28), transparent 70%); }}
+        .hero .kicker {{ font-size:.7rem; letter-spacing:.22em; text-transform:uppercase; color:#E3CFE0 !important; font-weight:700; }}
+        .hero .title {{ font-size:1.6rem; font-weight:800; margin: 4px 0 2px 0; color:{WHITE} !important; }}
+        .hero .sub {{ font-size:.88rem; color:#E9DDE7 !important; }}
+        .tape {{
+            display:flex; flex-wrap:wrap; gap:0; background:#24121F; border-radius: 0 0 12px 12px;
+            border: 1px solid #4E2C49; border-top: 1px solid #5E3A58; margin-bottom: 16px;
+        }}
+        .tape .cell {{ padding: 9px 18px; border-right: 1px solid #4E2C49; }}
+        .tape .lbl {{ font-size:.62rem; letter-spacing:.14em; text-transform:uppercase; color:#C9B2C5 !important; font-weight:600; }}
+        .tape .val {{ font-family:'JetBrains Mono', ui-monospace, monospace; font-size:.95rem; font-weight:700; color:{WHITE} !important; }}
+        .tape .val.up {{ color:#7EE2A8 !important; }}
+        .tape .val.down {{ color:#FF9C8F !important; }}
+        .tape .val.hl {{ color:#F2C46D !important; }}
 
-        /* ---------- Cartes KPI ---------- */
+        /* ================= Cartes KPI ================= */
         .kpi-card {{
-            background: #FFFFFF; border-radius: 10px; padding: 16px 18px 14px 18px;
-            border-left: 4px solid {BPCE_RED};
-            box-shadow: 0 2px 8px rgba(0,43,73,.08);
-            transition: transform .22s ease, box-shadow .22s ease;
-            height: 100%; min-height: 128px;
+            background: {WHITE}; border-radius: 10px; padding: 15px 17px 13px 17px;
+            border: 1px solid {BORDER}; border-top: 3px solid {PRUNE};
+            box-shadow: 0 1px 3px rgba(53,28,50,.06), 0 4px 14px rgba(53,28,50,.04);
+            transition: transform .2s ease, box-shadow .2s ease, border-color .2s;
+            height: 100%; min-height: 122px;
         }}
-        .kpi-card:hover {{ transform: translateY(-3px); box-shadow: 0 10px 24px rgba(0,43,73,.16); }}
-        .kpi-card.navy {{ border-left-color: {BPCE_NAVY}; }}
-        .kpi-label {{ font-size: .74rem; color: {BPCE_SLATE}; text-transform: uppercase;
-                      letter-spacing: .06em; font-weight: 600; }}
-        .kpi-value {{ font-size: 1.62rem; color: {BPCE_NAVY}; font-weight: 800; margin-top: 4px; line-height: 1.15; }}
-        .kpi-sub {{ font-size: .76rem; color: #6B7C8A; margin-top: 6px; }}
-        .kpi-delta.up {{ color: #2E8B57; font-weight: 700; }}
-        .kpi-delta.down {{ color: {BPCE_RED}; font-weight: 700; }}
+        .kpi-card:hover {{ transform: translateY(-3px); border-color: #D6C6D3;
+                           box-shadow: 0 12px 28px rgba(53,28,50,.12); }}
+        .kpi-card.alt {{ border-top-color: {MAUVE}; }}
+        .kpi-label {{ font-size: .68rem; color: {MUTED} !important; text-transform: uppercase;
+                      letter-spacing: .1em; font-weight: 700; }}
+        .kpi-value {{ font-size: 1.36rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: {PRUNE_DEEP} !important; font-weight: 800; margin-top: 5px;
+                      line-height: 1.15; font-variant-numeric: tabular-nums; }}
+        .kpi-sub {{ font-size: .75rem; color: {MUTED} !important; margin-top: 7px; line-height: 1.35; }}
+        .kpi-delta.up {{ color: #2F855A !important; font-weight: 700; }}
+        .kpi-delta.down {{ color: #B42318 !important; font-weight: 700; }}
 
-        [data-testid="stMetric"] {{
-            background:#fff; border-radius:10px; padding:12px 16px; border-left:4px solid {BPCE_NAVY};
-            box-shadow: 0 2px 8px rgba(0,43,73,.08); transition: transform .2s, box-shadow .2s;
-        }}
-        [data-testid="stMetric"]:hover {{ transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,43,73,.14); }}
-        [data-testid="stMetricValue"] {{ color: {BPCE_NAVY}; font-weight: 800; }}
-
-        /* ---------- Onglets ---------- */
-        .stTabs [data-baseweb="tab-list"] {{ gap: 6px; border-bottom: 2px solid #E1E7ED; }}
-        .stTabs [data-baseweb="tab"] {{
-            color: {BPCE_NAVY}; font-weight: 600; padding: 10px 18px;
-            border-radius: 8px 8px 0 0; background: transparent; transition: background .2s;
-        }}
-        .stTabs [data-baseweb="tab"]:hover {{ background: #E9EEF3; }}
-        .stTabs [aria-selected="true"] {{ color: {BPCE_RED} !important; background: #FFFFFF; }}
-        .stTabs [data-baseweb="tab-highlight"] {{ background-color: {BPCE_RED} !important; height: 3px; }}
-
-        /* ---------- Panneaux, badges, séparateurs ---------- */
-        .panel {{ background:#fff; border-radius:12px; padding:18px 20px;
-                  box-shadow: 0 2px 8px rgba(0,43,73,.07); margin-bottom: 14px; }}
-        .section-title {{ font-size:1.05rem; font-weight:700; color:{BPCE_NAVY};
-                          border-left:4px solid {BPCE_RED}; padding-left:10px; margin: 8px 0 12px 0; }}
-        .sep {{ height:1px; background: linear-gradient(90deg, {BPCE_RED} 0%, #D9E1E8 30%, transparent 100%);
+        /* ================= Panneaux, badges, PESTEL ================= */
+        .panel {{ background:{WHITE}; border-radius:10px; padding:16px 18px; border:1px solid {BORDER};
+                  box-shadow: 0 1px 3px rgba(53,28,50,.05); margin-bottom: 12px; color:{INK}; }}
+        .panel * {{ color: inherit; }}
+        .section-title {{ font-size:.8rem; font-weight:800; color:{PRUNE_DEEP} !important; text-transform: uppercase;
+                          letter-spacing:.12em; border-left:3px solid {PRUNE}; padding-left:10px; margin: 10px 0 12px 0; }}
+        .sep {{ height:1px; background: linear-gradient(90deg, {PRUNE} 0%, {BORDER} 25%, transparent 100%);
                 margin: 18px 0; border:none; }}
-        .src-badge {{ display:inline-block; font-size:.72rem; font-weight:600; padding:3px 10px;
-                      border-radius:20px; margin: 2px 6px 6px 0; }}
-        .src-badge.live {{ background:#E6F4EC; color:#1E6B43; border:1px solid #BFE3CD; }}
-        .src-badge.partial {{ background:#FFF6DD; color:#8A6400; border:1px solid #F3DD9B; }}
-        .src-badge.fallback {{ background:#FDECEE; color:#9B0D24; border:1px solid #F5C2CA; }}
-        .pestel {{ background:#fff; border-radius:10px; padding:14px; height:100%;
-                   box-shadow:0 2px 8px rgba(0,43,73,.07); border-top:4px solid {BPCE_NAVY};
-                   transition: transform .2s; }}
-        .pestel:hover {{ transform: translateY(-2px); }}
-        .pestel .letter {{ font-size:1.6rem; font-weight:800; color:{BPCE_RED}; line-height:1; }}
-        .pestel .name {{ font-size:.78rem; font-weight:700; color:{BPCE_NAVY}; text-transform:uppercase; letter-spacing:.05em; }}
-        .pestel .txt {{ font-size:.8rem; color:#44525E; margin-top:6px; }}
-        .stars {{ color:{BPCE_RED}; letter-spacing:2px; font-size:.9rem; }}
-        .level-pill {{ display:inline-block; padding:2px 10px; border-radius:12px; color:#fff;
-                       font-size:.75rem; font-weight:700; }}
-
-        .stButton > button[kind="primary"], .stDownloadButton > button {{
-            background: {BPCE_RED}; border: none; color: #fff; font-weight: 700; border-radius: 8px;
-            transition: transform .15s, box-shadow .15s;
-        }}
-        .stButton > button[kind="primary"]:hover, .stDownloadButton > button:hover {{
-            transform: translateY(-1px); box-shadow: 0 6px 16px rgba(200,16,46,.35); color:#fff;
-        }}
-        [data-testid="stDataFrame"] {{ border-radius: 10px; overflow: hidden;
-                                       box-shadow: 0 2px 8px rgba(0,43,73,.07); }}
+        .src-badge {{ display:inline-block; font-size:.7rem; font-weight:700; padding:3px 10px;
+                      border-radius:4px; margin: 0 6px 8px 0; letter-spacing:.02em; }}
+        .src-badge.live {{ background:#E8F5EE; color:#1F6B45 !important; border:1px solid #B9DFC9; }}
+        .src-badge.partial {{ background:#FDF4E3; color:#7A5410 !important; border:1px solid #EBD3A1; }}
+        .src-badge.fallback {{ background:{TINT}; color:{PRUNE} !important; border:1px solid #D9C6D5; }}
+        .pestel {{ background:{WHITE}; border-radius:10px; padding:14px; height:100%; border:1px solid {BORDER};
+                   border-top:3px solid {PRUNE}; transition: transform .2s, box-shadow .2s; }}
+        .pestel:hover {{ transform: translateY(-2px); box-shadow: 0 10px 22px rgba(53,28,50,.10); }}
+        .pestel .letter {{ font-size:1.5rem; font-weight:800; color:{PRUNE} !important; line-height:1; }}
+        .pestel .name {{ font-size:.72rem; font-weight:800; color:{PRUNE_DEEP} !important; text-transform:uppercase; letter-spacing:.08em; margin-top:2px; }}
+        .pestel .txt {{ font-size:.79rem; color:{INK} !important; margin-top:6px; line-height:1.4; }}
+        .stars {{ color:{GOLD} !important; letter-spacing:2px; font-size:.9rem; margin-top:4px; }}
+        .level-pill {{ display:inline-block; padding:2px 10px; border-radius:4px; color:{WHITE} !important;
+                       font-size:.72rem; font-weight:700; letter-spacing:.03em; }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -252,18 +407,19 @@ def style_fig(fig: go.Figure, height: int = 420, title: str | None = None) -> go
     fig.update_layout(
         template="plotly_white",
         height=height,
-        title=dict(text=title, font=dict(size=15, color=BPCE_NAVY), x=0.01) if title else None,
-        font=dict(family="Inter, Segoe UI, Roboto, sans-serif", size=12, color=BPCE_ANTHRACITE),
+        title=dict(text=title, font=dict(size=14, color=PRUNE_DEEP), x=0.01) if title else None,
+        font=dict(family="Inter, Segoe UI, Roboto, sans-serif", size=12, color=INK),
         paper_bgcolor="#FFFFFF",
         plot_bgcolor="#FFFFFF",
         margin=dict(l=40, r=24, t=56 if title else 24, b=70),
-        colorway=[BPCE_NAVY, BPCE_RED, BPCE_SLATE, BPCE_MIST, "#E8A0A8", "#7A8B99"],
+        colorway=[PRUNE, ACCENT, MAUVE, SLATE, GOLD, MIST],
         legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="left", x=0,
-                    bgcolor="rgba(0,0,0,0)", font=dict(size=11)),
-        hoverlabel=dict(bgcolor="#FFFFFF", font_size=12, bordercolor=BPCE_NAVY),
+                    bgcolor="rgba(0,0,0,0)", font=dict(size=11, color=INK)),
+        hoverlabel=dict(bgcolor="#FFFFFF", font_size=12, bordercolor=PRUNE),
     )
-    fig.update_xaxes(showgrid=False, linecolor="#D5DDE5")
-    fig.update_yaxes(gridcolor="#EEF2F5", zerolinecolor="#D5DDE5")
+    fig.update_xaxes(showgrid=False, linecolor=BORDER, tickfont=dict(color=MUTED))
+    fig.update_yaxes(gridcolor="#EEF1F4", zerolinecolor=BORDER, tickfont=dict(color=MUTED),
+                     title_font=dict(color=MUTED))
     return fig
 
 
@@ -480,11 +636,6 @@ COMPLIANCE_CHECKLIST = [
     ("prudential", "Prudentiel", "Autorisations superviseurs (prise de participation qualifiante)"),
     ("data_priv", "Données", "Protection des données (RGPD / loi locale) et transferts hors UE"),
 ]
-
-
-def flag_emoji(iso2: str) -> str:
-    """Convertit un code ISO-2 en drapeau emoji."""
-    return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in iso2.upper())
 
 
 def seeded_rng(*keys: str) -> np.random.Generator:
@@ -1007,11 +1158,11 @@ def register_status(statuses: dict[str, str], context: str) -> None:
         if key not in toasted:
             toasted.add(key)
             if stt == "live":
-                st.toast(f"Données en direct — {src}", icon="✅")
+                st.toast(f"Données en direct — {src}", icon=":material/cloud_done:")
             elif stt == "partial":
-                st.toast(f"{src} : données partielles, compléments simulés", icon="⚠️")
+                st.toast(f"{src} : données partielles, compléments simulés", icon=":material/cloud_sync:")
             else:
-                st.toast(f"{src} indisponible — données estimées / mode secours", icon="🛟")
+                st.toast(f"{src} indisponible — données estimées / mode secours", icon=":material/cloud_off:")
 
 
 def source_badges(statuses: dict[str, str]) -> None:
@@ -1225,10 +1376,10 @@ if REPORTLAB_OK:
 
         def _draw_frame(self, total: int) -> None:
             w, h = A4
-            # Header : bandeau bleu nuit + liseré rouge
-            self.setFillColor(_hex(BPCE_NAVY))
+            # Header : bandeau prune + liseré orchidée
+            self.setFillColor(_hex(PRUNE))
             self.rect(0, h - 22 * mm, w, 22 * mm, stroke=0, fill=1)
-            self.setFillColor(_hex(BPCE_RED))
+            self.setFillColor(_hex(ACCENT))
             self.rect(0, h - 23.5 * mm, w, 1.5 * mm, stroke=0, fill=1)
             self.rect(15 * mm, h - 16 * mm, 3 * mm, 9 * mm, stroke=0, fill=1)
             self.setFillColor(rl_colors.white)
@@ -1241,15 +1392,15 @@ if REPORTLAB_OK:
             self.setFont("Helvetica", 8)
             self.drawRightString(w - 15 * mm, h - 15.5 * mm, "Document de travail — Usage interne")
             # Footer
-            self.setStrokeColor(_hex(BPCE_NAVY))
+            self.setStrokeColor(_hex(PRUNE))
             self.setLineWidth(0.6)
             self.line(15 * mm, 14 * mm, w - 15 * mm, 14 * mm)
-            self.setFillColor(_hex(BPCE_SLATE))
+            self.setFillColor(_hex(SLATE))
             self.setFont("Helvetica", 7.5)
             self.drawString(15 * mm, 9.5 * mm, f"{APP_NAME} — Confidentiel — Diffusion restreinte")
             self.drawRightString(w - 38 * mm, 9.5 * mm, f"Édité le {datetime.now():%d/%m/%Y à %H:%M}")
             self.setFont("Helvetica-Bold", 7.5)
-            self.setFillColor(_hex(BPCE_RED))
+            self.setFillColor(_hex(ACCENT))
             self.drawRightString(w - 15 * mm, 9.5 * mm, f"Page {self._pageNumber} / {total}")
 
 
@@ -1257,22 +1408,22 @@ def _pdf_styles() -> dict[str, ParagraphStyle]:
     base = getSampleStyleSheet()
     return {
         "title": ParagraphStyle("t", parent=base["Title"], fontName="Helvetica-Bold", fontSize=19,
-                                textColor=_hex(BPCE_NAVY), alignment=TA_LEFT, spaceAfter=2, leading=23),
+                                textColor=_hex(PRUNE), alignment=TA_LEFT, spaceAfter=2, leading=23),
         "subtitle": ParagraphStyle("st", parent=base["Normal"], fontName="Helvetica", fontSize=10,
-                                   textColor=_hex(BPCE_SLATE), spaceAfter=10),
+                                   textColor=_hex(SLATE), spaceAfter=10),
         "h2": ParagraphStyle("h2", parent=base["Heading2"], fontName="Helvetica-Bold", fontSize=12.5,
-                             textColor=_hex(BPCE_NAVY), spaceBefore=10, spaceAfter=6,
+                             textColor=_hex(PRUNE), spaceBefore=10, spaceAfter=6,
                              borderPadding=(0, 0, 2, 0)),
         "body": ParagraphStyle("b", parent=base["Normal"], fontName="Helvetica", fontSize=9,
-                               leading=12.5, textColor=_hex(BPCE_ANTHRACITE)),
+                               leading=12.5, textColor=_hex(INK)),
         "small": ParagraphStyle("s", parent=base["Normal"], fontName="Helvetica", fontSize=7.5,
-                                leading=10, textColor=_hex(BPCE_SLATE)),
+                                leading=10, textColor=_hex(SLATE)),
         "box": ParagraphStyle("bx", parent=base["Normal"], fontName="Helvetica", fontSize=9.5,
-                              leading=13.5, textColor=_hex(BPCE_NAVY)),
+                              leading=13.5, textColor=_hex(PRUNE)),
     }
 
 
-def _pdf_table(data: list[list[Any]], col_widths: list[float], header_color: str = BPCE_NAVY,
+def _pdf_table(data: list[list[Any]], col_widths: list[float], header_color: str = PRUNE,
                zebra: bool = True, extra: list | None = None) -> Table:
     tbl = Table(data, colWidths=col_widths, repeatRows=1)
     style = [
@@ -1285,12 +1436,12 @@ def _pdf_table(data: list[list[Any]], col_widths: list[float], header_color: str
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4.5),
         ("TOPPADDING", (0, 0), (-1, -1), 4.5),
-        ("LINEBELOW", (0, -1), (-1, -1), 0.8, _hex(BPCE_NAVY)),
+        ("LINEBELOW", (0, -1), (-1, -1), 0.8, _hex(PRUNE)),
     ]
     if zebra:
         for r in range(1, len(data)):
             if r % 2 == 0:
-                style.append(("BACKGROUND", (0, r), (-1, r), _hex(BPCE_LIGHT)))
+                style.append(("BACKGROUND", (0, r), (-1, r), _hex(BG)))
     if extra:
         style.extend(extra)
     tbl.setStyle(TableStyle(style))
@@ -1310,18 +1461,18 @@ def _pdf_bar_chart(pl: pd.DataFrame) -> Drawing:
     chart.valueAxis.labels.fontName = "Helvetica"
     chart.valueAxis.labels.fontSize = 7
     chart.valueAxis.valueMin = min(0, float(pl["Resultat_net"].min()) * 1.2)
-    chart.valueAxis.gridStrokeColor = _hex("#E1E7ED")
+    chart.valueAxis.gridStrokeColor = _hex(BORDER)
     chart.valueAxis.visibleGrid = True
-    chart.bars[0].fillColor = _hex(BPCE_NAVY)
-    chart.bars[1].fillColor = _hex(BPCE_RED)
+    chart.bars[0].fillColor = _hex(PRUNE)
+    chart.bars[1].fillColor = _hex(ACCENT)
     chart.bars.strokeColor = None
     chart.barSpacing = 1.5
     chart.groupSpacing = 8
     d.add(chart)
     d.add(String(14 * mm, 57 * mm, "■ PNB post-synergies", fontName="Helvetica", fontSize=7.5,
-                 fillColor=_hex(BPCE_NAVY)))
+                 fillColor=_hex(PRUNE)))
     d.add(String(52 * mm, 57 * mm, "■ Résultat net", fontName="Helvetica", fontSize=7.5,
-                 fillColor=_hex(BPCE_RED)))
+                 fillColor=_hex(ACCENT)))
     return d
 
 
@@ -1366,8 +1517,8 @@ def generate_pdf_report(payload: dict[str, Any]) -> bytes:
     box = Table([[Paragraph(f"<b>Message clé — {escape(reco['verdict'])}</b><br/>{escape(reco['text'])}",
                             S["box"])]], colWidths=[W])
     box.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), _hex("#EEF3F7")),
-        ("LINEBEFORE", (0, 0), (0, -1), 4, _hex(BPCE_RED)),
+        ("BACKGROUND", (0, 0), (-1, -1), _hex(TINT)),
+        ("LINEBEFORE", (0, 0), (0, -1), 4, _hex(ACCENT)),
         ("LEFTPADDING", (0, 0), (-1, -1), 10), ("RIGHTPADDING", (0, 0), (-1, -1), 10),
         ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
     ]))
@@ -1382,12 +1533,12 @@ def generate_pdf_report(payload: dict[str, Any]) -> bytes:
     kt = Table(kpis, colWidths=[W / 5] * 5)
     kt.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica"), ("FONTSIZE", (0, 0), (-1, 0), 7.5),
-        ("TEXTCOLOR", (0, 0), (-1, 0), _hex(BPCE_SLATE)),
+        ("TEXTCOLOR", (0, 0), (-1, 0), _hex(SLATE)),
         ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"), ("FONTSIZE", (0, 1), (-1, 1), 11),
-        ("TEXTCOLOR", (0, 1), (-1, 1), _hex(BPCE_NAVY)),
+        ("TEXTCOLOR", (0, 1), (-1, 1), _hex(PRUNE)),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("BOX", (0, 0), (-1, -1), 0.5, _hex("#D5DDE5")),
-        ("LINEAFTER", (0, 0), (-2, -1), 0.5, _hex("#D5DDE5")),
+        ("BOX", (0, 0), (-1, -1), 0.5, _hex(BORDER)),
+        ("LINEAFTER", (0, 0), (-2, -1), 0.5, _hex(BORDER)),
         ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
     story += [kt, Spacer(1, 6)]
@@ -1429,7 +1580,7 @@ def generate_pdf_report(payload: dict[str, Any]) -> bytes:
                   ("FONTNAME", (2, i), (2, i), "Helvetica-Bold"),
                   ("ALIGN", (2, i), (2, i), "CENTER")]
     extra.append(("ALIGN", (3, 0), (3, -1), "LEFT"))
-    story.append(_pdf_table(rrows, [42 * mm, 20 * mm, 22 * mm, W - 84 * mm], header_color=BPCE_RED,
+    story.append(_pdf_table(rrows, [42 * mm, 20 * mm, 22 * mm, W - 84 * mm], header_color=ACCENT,
                             zebra=False, extra=extra))
     top = sorted(risk["matrix"], key=lambda r: r[1] * r[2], reverse=True)[:3]
     story.append(Spacer(1, 4))
@@ -1449,7 +1600,7 @@ def generate_pdf_report(payload: dict[str, Any]) -> bytes:
               _fmt(t.get("pb"), "{:.2f}x"), _fmt(t.get("roe"), "{:.1f} %"),
               _fmt(t.get("div_yield"), "{:.1f} %"), Paragraph(escape(str(t.get("source", ""))), S["small"])]]
     story.append(_pdf_table(trows, [44 * mm, 26 * mm, 20 * mm, 14 * mm, 14 * mm, 15 * mm, 15 * mm,
-                                    W - 148 * mm]))
+                                    W - 148 * mm], extra=[("ALIGN", (7, 0), (7, -1), "LEFT")]))
     story.append(Spacer(1, 4))
     story.append(Paragraph(escape(payload["target_comment"]), S["body"]))
 
@@ -1481,7 +1632,7 @@ def generate_pdf_report(payload: dict[str, Any]) -> bytes:
     ncol = len(head) - 1
     story.append(_pdf_table(prow, [52 * mm] + [(W - 52 * mm) / ncol] * ncol,
                             extra=[("FONTNAME", (0, 8), (-1, 8), "Helvetica-Bold"),
-                                   ("TEXTCOLOR", (0, 8), (-1, 8), _hex(BPCE_RED)),
+                                   ("TEXTCOLOR", (0, 8), (-1, 8), _hex(ACCENT)),
                                    ("FONTSIZE", (0, 0), (-1, -1), 7.6 if ncol > 6 else 8.2)]))
     story.append(Spacer(1, 4))
     story.append(KeepTogether([_pdf_bar_chart(pl), Paragraph(
@@ -1544,10 +1695,34 @@ def render_cards(cards: list[str]) -> None:
         col.markdown(html, unsafe_allow_html=True)
 
 
-def hero(kicker: str, title: str, subtitle: str) -> None:
-    st.markdown(f'<div class="hero"><div class="kicker">{kicker}</div>'
-                f'<div class="title">{title}</div><div class="sub">{subtitle}</div></div>',
-                unsafe_allow_html=True)
+def hero(kicker: str, title: str, subtitle: str, tape: list[tuple[str, str, str]] | None = None) -> None:
+    """Bandeau de module + ruban « terminal » (libellé, valeur, style up/down/hl)."""
+    html = (f'<div class="hero"><div class="kicker">{kicker}</div>'
+            f'<div class="title">{title}</div><div class="sub">{subtitle}</div></div>')
+    cells = "".join(f'<div class="cell"><div class="lbl">{lbl}</div><div class="val {cls}">{val}</div></div>'
+                    for lbl, val, cls in (tape or []))
+    html += f'<div class="tape">{cells}</div>' if cells else ""
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def market_tape(ctx: dict) -> list[tuple[str, str, str]]:
+    """Ruban de données clés du pays, commun à tous les modules."""
+    lt, mk, p = ctx["latest"], ctx["market"], ctx["profile"]
+    g = lt["gdp_growth"]["value"]
+    tape = [
+        ("Pays", f"{p['iso2']} · {p['currency']}", "hl"),
+        ("PIB", f"{lt['gdp_usd']['value']:,.0f} Md$".replace(",", " "), ""),
+        ("Croissance", f"{g:+.1f}%", "up" if g >= 0 else "down"),
+        ("Inflation", f"{lt['inflation']['value']:.1f}%", "down" if lt["inflation"]["value"] > 4 else ""),
+        ("Spread souv.", f"{mk['spread_bps']:.0f} pb", "down" if mk["spread_bps"] > 300 else ""),
+        ("Vol. FX/EUR", f"{mk['fx_vol']:.1f}%", ""),
+    ]
+    if mk.get("policy_rate") is not None:
+        tape.append(("Taux directeur", f"{mk['policy_rate']:.2f}%", ""))
+    lvl = risk_level(ctx["risk"]["composite"])
+    tape.append(("Risque composite", f"{ctx['risk']['composite']:.0f} · {lvl}",
+                 "up" if lvl == "Faible" else "down" if lvl in ("Élevé", "Critique") else "hl"))
+    return tape
 
 
 def section(title: str) -> None:
@@ -1558,42 +1733,40 @@ def separator() -> None:
     st.markdown('<div class="sep"></div>', unsafe_allow_html=True)
 
 
-MODULES = ["🌍 Dashboard PESTEL & Macro", "🛡️ Compliance, KYC & Risques",
-           "🎯 Cartographie M&A", "📈 Simulateur Post-Acquisition", "📄 Note de Synthèse PDF"]
+MODULES = ["Dashboard PESTEL & Macro", "Compliance, KYC & Risques",
+           "Cartographie M&A", "Simulateur Post-Acquisition", "Note de Synthèse PDF"]
 
 
 def render_sidebar() -> tuple[str, str, str]:
     """Sidebar : badge, sélecteur géographique hiérarchique, navigation, statut API."""
     with st.sidebar:
         st.markdown(
-            '<div class="brand-badge"><div class="b1">Groupe BPCE</div>'
-            '<div class="b2">International<br/>Strategy Hub</div>'
-            '<div class="b3">Stratégie & Développement International</div></div>',
-            unsafe_allow_html=True)
-
-        st.markdown("##### 🧭 Périmètre géographique")
+            '<div class="brand"><div class="row"><span class="mark">BPCE</span><div>'
+            '<div class="t1">Groupe BPCE</div><div class="t2">International Strategy Hub</div>'
+            '</div></div></div>', unsafe_allow_html=True)
+        st.markdown('<div class="side-h">Périmètre géographique</div>', unsafe_allow_html=True)
         region = st.selectbox("Zone géographique / Bloc économique", list(REGIONS), key="region")
         iso_opts = REGIONS[region]
         iso3 = st.selectbox(
             "Pays cible", iso_opts, key=f"country_{region}",
-            format_func=lambda i: f"{flag_emoji(PROFILES[i]['iso2'])}  {PROFILES[i]['name']}")
+            format_func=lambda i: f"{PROFILES[i]['name']}  ·  {PROFILES[i]['iso2']}")
         st.divider()
-        st.markdown("##### 🗂️ Modules")
+        st.markdown('<div class="side-h">Modules</div>', unsafe_allow_html=True)
         module = st.radio("Navigation", MODULES, key="module", label_visibility="collapsed")
         st.divider()
 
-        with st.expander("📡 Statut des connexions API", expanded=False):
+        with st.expander("Statut des connexions API", expanded=False):
             reg = st.session_state.get("api_status", {})
-            colors = {"live": "#3DDC84", "partial": "#F2C94C", "fallback": "#FF6B6B"}
+            colors = {"live": "#7EE2A8", "partial": "#F2C46D", "fallback": "#FF9C8F"}
             labels = {"live": "En direct", "partial": "Partiel", "fallback": "Mode secours"}
             for src in ["Banque Mondiale", "FMI", "FRED", "BCE", "Yahoo Finance"]:
                 stt = reg.get(src)
-                color = colors.get(stt, "#8A9BA8")
+                color = colors.get(stt, "#9C8A99")
                 label = labels.get(stt, "Non sollicitée")
                 st.markdown(f'<div class="api-row"><span><span class="dot" style="background:{color}">'
                             f'</span>{src}</span><span>{label}</span></div>', unsafe_allow_html=True)
             st.caption(f"Cache : {CACHE_TTL // 60} min • Timeout : {HTTP_TIMEOUT} s")
-            if st.button("🔄 Rafraîchir les données", width="stretch"):
+            if st.button("Rafraîchir les données", icon=":material/refresh:", width="stretch"):
                 st.cache_data.clear()
                 st.session_state["api_status"] = {}
                 st.session_state["toasted"] = set()
@@ -1673,31 +1846,31 @@ def timeseries_chart(df: pd.DataFrame, iso3: str, ind: str, smooth: bool) -> go.
     band = sigma * (1 + 0.8 * horizon)
     fig.add_trace(go.Scatter(x=np.concatenate([x, x[::-1]]),
                              y=np.concatenate([y + band, (y - band)[::-1]]),
-                             fill="toself", fillcolor="rgba(0,43,73,0.10)", line=dict(width=0),
+                             fill="toself", fillcolor="rgba(74,40,69,0.10)", line=dict(width=0),
                              hoverinfo="skip", name="Zone d'incertitude (±1σ)"))
     act = s[~s["projection"]]
     proj = s[s["projection"]]
     fig.add_trace(go.Scatter(x=act["year"], y=act["value"], mode="lines+markers", name="Réalisé",
-                             line=dict(color=BPCE_NAVY, width=3, shape="spline" if smooth else "linear"),
-                             marker=dict(size=7, color=BPCE_NAVY, line=dict(color="#fff", width=1.5)),
+                             line=dict(color=PRUNE, width=3, shape="spline" if smooth else "linear"),
+                             marker=dict(size=7, color=PRUNE, line=dict(color="#fff", width=1.5)),
                              customdata=act["source"],
                              hovertemplate="%{x} : %{y:.2f} " + meta["unit"] + "<br>%{customdata}<extra></extra>"))
     if not proj.empty:
         link = pd.concat([act.tail(1), proj])
         fig.add_trace(go.Scatter(x=link["year"], y=link["value"], mode="lines+markers", name="Projection",
-                                 line=dict(color=BPCE_RED, width=3, dash="dot",
+                                 line=dict(color=ACCENT, width=3, dash="dot",
                                            shape="spline" if smooth else "linear"),
-                                 marker=dict(size=8, symbol="diamond", color=BPCE_RED),
+                                 marker=dict(size=8, symbol="diamond", color=ACCENT),
                                  customdata=link["source"],
                                  hovertemplate="%{x} : %{y:.2f} " + meta["unit"] +
                                                "<br>%{customdata}<extra></extra>"))
-        fig.add_vrect(x0=last_actual + 0.5, x1=x.max() + 0.5, fillcolor=BPCE_RED, opacity=0.04,
+        fig.add_vrect(x0=last_actual + 0.5, x1=x.max() + 0.5, fillcolor=ACCENT, opacity=0.04,
                       line_width=0, annotation_text="Projections", annotation_position="top left",
-                      annotation_font=dict(color=BPCE_RED, size=11))
+                      annotation_font=dict(color=ACCENT, size=11))
     if smooth and len(act) >= 3:
         ma = act["value"].rolling(3, center=True, min_periods=2).mean()
         fig.add_trace(go.Scatter(x=act["year"], y=ma, mode="lines", name="Moyenne mobile 3 ans",
-                                 line=dict(color=BPCE_SLATE, width=1.5, dash="dash")))
+                                 line=dict(color=SLATE, width=1.5, dash="dash")))
     fig.update_xaxes(dtick=1)
     fig.update_yaxes(title_text=meta["unit"])
     return style_fig(fig, 430, f"{meta['label']} — {PROFILES[iso3]['name']} ({YEARS[0]}-{YEARS[-1]})")
@@ -1706,8 +1879,9 @@ def timeseries_chart(df: pd.DataFrame, iso3: str, ind: str, smooth: bool) -> go.
 def module_macro(ctx: dict) -> None:
     iso3, p, df, latest, avg = ctx["iso3"], ctx["profile"], ctx["macro"], ctx["latest"], ctx["avg"]
     hero("Module 1 • Dashboard PESTEL & Macroéconomie",
-         f"{flag_emoji(p['iso2'])} {p['name']} — Environnement macroéconomique",
-         f"{ctx['region']} • Banque Mondiale (WDI/WGI), FMI (WEO), BCE • Horizon {YEARS[0]}-{YEARS[-1]}")
+         f"{p['name']} — Environnement macroéconomique",
+         f"{ctx['region']} • Banque Mondiale (WDI/WGI), FMI (WEO), BCE • Horizon {YEARS[0]}-{YEARS[-1]}",
+         tape=market_tape(ctx))
     source_badges(ctx["macro_status"])
 
     def delta(ind):
@@ -1728,24 +1902,24 @@ def module_macro(ctx: dict) -> None:
         kpi_card("Chômage", f"{latest['unemployment']['value']:.1f} %", sub("unemployment"),
                  delta("unemployment"), good_if_up=False),
         kpi_card("Balance commerciale", f"{latest['trade_balance']['value']:+.1f} % PIB",
-                 sub("trade_balance"), delta("trade_balance"), variant="navy"),
+                 sub("trade_balance"), delta("trade_balance"), variant="alt"),
         kpi_card("Stabilité politique", f"{latest['wgi_pv']['value']:+.2f}",
-                 f"WGI {latest['wgi_pv']['year']} • échelle -2,5/+2,5", delta("wgi_pv"), variant="navy"),
+                 f"WGI {latest['wgi_pv']['year']} • échelle -2,5/+2,5", delta("wgi_pv"), variant="alt"),
     ])
     st.write("")
     mk = ctx["market"]
-    extra_cards = [kpi_card("Spread souverain", f"{mk['spread_bps']:.0f} pb", mk["spread_src"], variant="navy"),
-                   kpi_card("Volatilité change vs EUR", f"{mk['fx_vol']:.1f} %", mk["fx_src"], variant="navy")]
+    extra_cards = [kpi_card("Spread souverain", f"{mk['spread_bps']:.0f} pb", mk["spread_src"], variant="alt"),
+                   kpi_card("Volatilité change vs EUR", f"{mk['fx_vol']:.1f} %", mk["fx_src"], variant="alt")]
     if mk["policy_rate"] is not None:
         extra_cards.insert(0, kpi_card("Taux directeur de référence", f"{mk['policy_rate']:.2f} %",
-                                       mk["policy_label"], variant="navy"))
+                                       mk["policy_label"], variant="alt"))
     if latest["gdp_growth"]["proj"] is not None:
         extra_cards.append(kpi_card("Croissance projetée 2026", f"{latest['gdp_growth']['proj']:+.1f} %",
                                     "FMI WEO / estimation"))
     render_cards(extra_cards)
     separator()
 
-    tabs = st.tabs(["🧩 Analyse PESTEL", "📉 Évolution temporelle", "📊 Comparatif régional", "🗃️ Données brutes"])
+    tabs = st.tabs(["Analyse PESTEL", "Évolution temporelle", "Comparatif régional", "Données brutes"])
     with tabs[0]:
         section("Grille PESTEL — notation automatisée (5 = environnement favorable)")
         cols = st.columns(6)
@@ -1763,7 +1937,7 @@ def module_macro(ctx: dict) -> None:
         ind = c1.selectbox("Indicateur", list(INDICATORS), key="macro_ind",
                            format_func=lambda k: f"{INDICATORS[k]['label']} ({INDICATORS[k]['unit']})")
         smooth = c2.toggle("Lissage (spline + MM3)", value=True, key="macro_smooth")
-        st.plotly_chart(timeseries_chart(df, iso3, ind, smooth), width="stretch", config=PLOTLY_CONFIG)
+        st.plotly_chart(timeseries_chart(df, iso3, ind, smooth), width="stretch", theme=None, config=PLOTLY_CONFIG)
         st.caption("Zone d'incertitude : ±1σ des variations annuelles historiques, élargie sur l'horizon de "
                    "projection. Les projections proviennent du FMI (WEO) ou du mode secours.")
 
@@ -1776,32 +1950,32 @@ def module_macro(ctx: dict) -> None:
         zone_mean = pivot.mean(axis=1)
         fig = go.Figure()
         if iso3 in pivot:
-            fig.add_bar(x=pivot.index, y=pivot[iso3], name=p["name"], marker_color=BPCE_NAVY,
+            fig.add_bar(x=pivot.index, y=pivot[iso3], name=p["name"], marker_color=PRUNE,
                         hovertemplate="%{x} : %{y:.2f}<extra>" + p["name"] + "</extra>")
-        fig.add_bar(x=zone_mean.index, y=zone_mean, name="Moyenne de la zone", marker_color=BPCE_RED,
+        fig.add_bar(x=zone_mean.index, y=zone_mean, name="Moyenne de la zone", marker_color=ACCENT,
                     opacity=0.85, hovertemplate="%{x} : %{y:.2f}<extra>Moyenne zone</extra>")
         fig.update_layout(barmode="group", bargap=0.25)
         fig.update_xaxes(dtick=1)
         st.plotly_chart(style_fig(fig, 400, f"{meta['label']} : {p['name']} vs moyenne {ctx['region']}"),
-                        width="stretch", config=PLOTLY_CONFIG)
+                        width="stretch", theme=None, config=PLOTLY_CONFIG)
 
         snap = pd.DataFrame([{"Pays": PROFILES[i]["name"], "Valeur": latest_values(df, i)[ind2]["value"],
                               "iso3": i} for i in ctx["region_isos"]]).sort_values("Valeur")
         fig2 = go.Figure(go.Bar(
             x=snap["Valeur"], y=snap["Pays"], orientation="h",
-            marker_color=[BPCE_RED if i == iso3 else BPCE_MIST for i in snap["iso3"]],
+            marker_color=[ACCENT if i == iso3 else MIST for i in snap["iso3"]],
             text=[meta["fmt"].format(v) for v in snap["Valeur"]], textposition="outside"))
-        fig2.add_vline(x=snap["Valeur"].mean(), line_dash="dash", line_color=BPCE_NAVY,
-                       annotation_text="Moyenne zone", annotation_font_color=BPCE_NAVY)
+        fig2.add_vline(x=snap["Valeur"].mean(), line_dash="dash", line_color=PRUNE,
+                       annotation_text="Moyenne zone", annotation_font_color=PRUNE)
         st.plotly_chart(style_fig(fig2, 320, f"Positionnement intra-zone — dernière valeur ({meta['unit']})"),
-                        width="stretch", config=PLOTLY_CONFIG)
+                        width="stretch", theme=None, config=PLOTLY_CONFIG)
 
     with tabs[3]:
         wide = (df[df["iso3"] == iso3]
                 .assign(Indicateur=lambda d: d["indicator"].map(lambda k: INDICATORS[k]["label"]))
                 .pivot_table(index="Indicateur", columns="year", values="value").round(2))
         st.dataframe(wide, width="stretch")
-        st.download_button("⬇️ Exporter les données (CSV)", df.to_csv(index=False).encode("utf-8"),
+        st.download_button("Exporter les données (CSV)", df.to_csv(index=False).encode("utf-8"), icon=":material/download:",
                            file_name=f"macro_{iso3}.csv", mime="text/csv")
 
 
@@ -1811,15 +1985,15 @@ def gauge(title: str, value: float) -> go.Figure:
     lvl = risk_level(value)
     fig = go.Figure(go.Indicator(
         mode="gauge+number", value=value,
-        number=dict(suffix=" /100", valueformat=".0f", font=dict(size=26, color=BPCE_NAVY)),
+        number=dict(suffix=" /100", valueformat=".0f", font=dict(size=26, color=PRUNE)),
         title=dict(text=f"<b>{title}</b><br><span style='font-size:13px;color:{RISK_COLORS[lvl]}'>"
-                        f"Niveau : {lvl}</span>", font=dict(size=15, color=BPCE_NAVY)),
+                        f"Niveau : {lvl}</span>", font=dict(size=15, color=PRUNE)),
         gauge=dict(
-            axis=dict(range=[0, 100], tickwidth=1, tickcolor="#B0BCC7"),
-            bar=dict(color=BPCE_NAVY, thickness=0.28),
+            axis=dict(range=[0, 100], tickwidth=1, tickcolor=MIST),
+            bar=dict(color=PRUNE, thickness=0.28),
             bgcolor="white", borderwidth=0,
-            steps=[dict(range=[0, 25], color="#D7EFE1"), dict(range=[25, 50], color="#FBEFC5"),
-                   dict(range=[50, 75], color="#F9D8C2"), dict(range=[75, 100], color="#F5C2CA")],
+            steps=[dict(range=[0, 25], color="#DDF0E5"), dict(range=[25, 50], color="#F7EBCF"),
+                   dict(range=[50, 75], color="#F5DCCB"), dict(range=[75, 100], color="#F3D0CC")],
             threshold=dict(line=dict(color=RISK_COLORS[lvl], width=4), thickness=0.85, value=value))))
     fig = style_fig(fig, 270)
     fig.update_layout(margin=dict(l=38, r=38, t=80, b=10))
@@ -1828,16 +2002,16 @@ def gauge(title: str, value: float) -> go.Figure:
 
 def risk_matrix_chart(matrix: list[tuple[str, float, float]]) -> go.Figure:
     fig = go.Figure()
-    zones = [(1, 1, 5, 5, "#FDECEE"), (1, 1, 3.4, 3.4, "#FBEFC5"), (1, 1, 2.2, 2.2, "#D7EFE1")]
+    zones = [(1, 1, 5, 5, "#F8E3E1"), (1, 1, 3.4, 3.4, "#F7EBCF"), (1, 1, 2.2, 2.2, "#DDF0E5")]
     for x0, y0, x1, y1, color in zones:
         fig.add_shape(type="rect", x0=x0, y0=y0, x1=x1, y1=y1, fillcolor=color, line_width=0, layer="below")
     names, probs, imps = zip(*matrix)
     crit = [p * i for p, i in zip(probs, imps)]
     fig.add_trace(go.Scatter(
         x=probs, y=imps, mode="markers+text", text=names, textposition="top center",
-        textfont=dict(size=11, color=BPCE_NAVY),
+        textfont=dict(size=11, color=PRUNE),
         marker=dict(size=[12 + c * 1.4 for c in crit], color=crit,
-                    colorscale=[[0, "#2E8B57"], [0.45, "#E0A100"], [0.7, "#E36414"], [1, BPCE_RED]],
+                    colorscale=[[0, "#2F855A"], [0.45, "#B7791F"], [0.7, "#C05621"], [1, "#B42318"]],
                     cmin=1, cmax=25, line=dict(color="#fff", width=2),
                     colorbar=dict(title="Criticité", thickness=12)),
         hovertemplate="<b>%{text}</b><br>Probabilité : %{x:.1f}/5<br>Impact : %{y:.1f}/5<extra></extra>"))
@@ -1849,36 +2023,37 @@ def risk_matrix_chart(matrix: list[tuple[str, float, float]]) -> go.Figure:
 def module_risk(ctx: dict) -> None:
     iso3, p, latest, market = ctx["iso3"], ctx["profile"], ctx["latest"], ctx["market"]
     hero("Module 2 • Compliance, KYC & Risk Index",
-         f"{flag_emoji(p['iso2'])} {p['name']} — Cartographie des risques",
-         f"WGI (proxy CPI), FRED (spreads, stress EM), BCE, Yahoo Finance (change) • Superviseur : {p['supervisor']}")
+         f"{p['name']} — Cartographie des risques",
+         f"WGI (proxy CPI), FRED (spreads, stress EM), BCE, Yahoo Finance (change) • Superviseur : {p['supervisor']}",
+         tape=market_tape(ctx))
     source_badges({**ctx["macro_status"], **ctx["market_status"]})
     risk = ctx["risk"]
 
-    tabs = st.tabs(["🎛️ Jauges de risque", "🗺️ Matrice des risques", "✅ Checklist conformité"])
+    tabs = st.tabs(["Jauges de risque", "Matrice des risques", "Checklist conformité"])
     with tabs[0]:
         cols = st.columns(3)
         for col, (name, score) in zip(cols, risk["scores"].items()):
-            col.plotly_chart(gauge(name, score), width="stretch", config=PLOTLY_CONFIG)
+            col.plotly_chart(gauge(name, score), width="stretch", theme=None, config=PLOTLY_CONFIG)
         lvl = risk_level(risk["composite"])
         render_cards([
             kpi_card("Score composite", f"{risk['composite']:.0f} / 100",
                      f'<span class="level-pill" style="background:{RISK_COLORS[lvl]}">{lvl}</span>'),
-            kpi_card("Spread souverain", f"{market['spread_bps']:.0f} pb", market["spread_src"], variant="navy"),
+            kpi_card("Spread souverain", f"{market['spread_bps']:.0f} pb", market["spread_src"], variant="alt"),
             kpi_card("Contrôle corruption (WGI)", f"{latest['wgi_cc']['value']:+.2f}",
-                     "Proxy indice CPI Transparency International", variant="navy"),
+                     "Proxy indice CPI Transparency International", variant="alt"),
             kpi_card("Stress EM (ICE BofA OAS)",
                      f"{market['em_oas']:.0f} pb" if market["em_oas"] is not None else "n.d.",
                      "FRED BAMLEMCBPIOAS" if market["em_oas"] is not None else "Source indisponible",
-                     variant="navy"),
+                     variant="alt"),
         ])
         if market.get("yield_hist") is not None:
             yh = market["yield_hist"]
             fig = go.Figure()
-            fig.add_scatter(x=yh.index, y=yh["Pays"], name=f"OAT/10 ans {p['name']}", line=dict(color=BPCE_NAVY))
-            fig.add_scatter(x=yh.index, y=yh["Bund"], name="Bund 10 ans", line=dict(color=BPCE_RED, dash="dot"))
+            fig.add_scatter(x=yh.index, y=yh["Pays"], name=f"OAT/10 ans {p['name']}", line=dict(color=PRUNE))
+            fig.add_scatter(x=yh.index, y=yh["Bund"], name="Bund 10 ans", line=dict(color=ACCENT, dash="dot"))
             st.plotly_chart(style_fig(fig, 300, "Taux souverains 10 ans (FRED / OCDE)"), width="stretch",
-                            config=PLOTLY_CONFIG)
-        with st.expander("🔍 Méthodologie de scoring"):
+                            theme=None, config=PLOTLY_CONFIG)
+        with st.expander("Méthodologie de scoring", icon=":material/functions:"):
             c = risk["components"]
             st.markdown(
                 f"""
@@ -1898,7 +2073,7 @@ UE, ONU et OFAC en vigueur.""")
 
     with tabs[1]:
         c1, c2 = st.columns([2.2, 1])
-        c1.plotly_chart(risk_matrix_chart(risk["matrix"]), width="stretch", config=PLOTLY_CONFIG)
+        c1.plotly_chart(risk_matrix_chart(risk["matrix"]), width="stretch", theme=None, config=PLOTLY_CONFIG)
         with c2:
             section("Top risques (criticité)")
             ranked = sorted(risk["matrix"], key=lambda r: r[1] * r[2], reverse=True)
@@ -1906,7 +2081,7 @@ UE, ONU et OFAC en vigueur.""")
                 crit = prob * imp
                 lvl = "Critique" if crit >= 17 else "Élevé" if crit >= 11 else "Modéré" if crit >= 6 else "Faible"
                 st.markdown(f'<div class="panel" style="padding:10px 14px;margin-bottom:8px">'
-                            f'<b style="color:{BPCE_NAVY}">{name}</b><br/>'
+                            f'<b style="color:{PRUNE}">{name}</b><br/>'
                             f'<span class="level-pill" style="background:{RISK_COLORS[lvl]}">{lvl}</span> '
                             f'<small>P {prob:.1f} × I {imp:.1f} = {crit:.1f}/25</small></div>',
                             unsafe_allow_html=True)
@@ -1933,8 +2108,8 @@ UE, ONU et OFAC en vigueur.""")
         for idx, regime in enumerate(regimes):
             with cols[idx % 2]:
                 st.markdown(f'<div class="panel" style="padding:12px 16px">'
-                            f'<b style="color:{BPCE_RED}">{regime}</b> '
-                            f'<small style="color:#6B7C8A">— {notes.get(regime, "")}</small></div>',
+                            f'<b style="color:{ACCENT}">{regime}</b> '
+                            f'<small style="color:#55505A">— {notes.get(regime, "")}</small></div>',
                             unsafe_allow_html=True)
                 for cid, reg, label in COMPLIANCE_CHECKLIST:
                     if reg == regime:
@@ -1967,8 +2142,9 @@ def selected_target(ctx: dict, targets: pd.DataFrame) -> dict[str, Any]:
 def module_ma(ctx: dict) -> None:
     iso3, p = ctx["iso3"], ctx["profile"]
     hero("Module 3 • Cartographie M&A & Ciblage d'Opportunités",
-         f"{flag_emoji(p['iso2'])} {p['name']} — Banques, institutions financières & Fintechs",
-         "Yahoo Finance • Valorisation relative • Droite de Gordon P/B = ROE / Ke")
+         f"{p['name']} — Banques, institutions financières & Fintechs",
+         "Yahoo Finance • Valorisation relative • Droite de Gordon P/B = ROE / Ke",
+         tape=market_tape(ctx))
     targets = get_targets(ctx)
     source_badges(ctx["ma_status"])
 
@@ -1988,11 +2164,11 @@ def module_ma(ctx: dict) -> None:
     render_cards([
         kpi_card("Cibles analysées", f"{len(view)}", f"sur {len(targets)} dans l'univers"),
         kpi_card("Capitalisation cumulée", f"{total_cap:,.1f} Md$".replace(",", " "), "Conversion USD indicative"),
-        kpi_card("ROE médian", f"{view['roe'].median():.1f} %", "Rentabilité des fonds propres", variant="navy"),
-        kpi_card("P/B médian", f"{view['pb'].median():.2f}x", "Price-to-Book", variant="navy"),
+        kpi_card("ROE médian", f"{view['roe'].median():.1f} %", "Rentabilité des fonds propres", variant="alt"),
+        kpi_card("P/B médian", f"{view['pb'].median():.2f}x", "Price-to-Book", variant="alt"),
     ])
     separator()
-    tabs = st.tabs(["📋 Tableau comparatif", "🔵 Valorisation vs Rentabilité", "🎯 Fiche cible"])
+    tabs = st.tabs(["Tableau comparatif", "Valorisation vs Rentabilité", "Fiche cible"])
 
     with tabs[0]:
         show = view[["name", "ticker", "category", "market_cap_usd_m", "pe", "pb", "roe", "div_yield",
@@ -2016,7 +2192,7 @@ def module_ma(ctx: dict) -> None:
                                                                   min_value=0, max_value=100),
                 "source": st.column_config.TextColumn("Provenance"),
             })
-        st.download_button("⬇️ Exporter (CSV)", show.to_csv(index=False).encode("utf-8"),
+        st.download_button("Exporter (CSV)", show.to_csv(index=False).encode("utf-8"), icon=":material/download:",
                            file_name=f"cibles_ma_{iso3}.csv", mime="text/csv")
 
     with tabs[1]:
@@ -2025,8 +2201,8 @@ def module_ma(ctx: dict) -> None:
         fig = go.Figure()
         xs = np.linspace(min(0, v["roe"].min() - 2), max(25, v["roe"].max() + 2), 50)
         fig.add_scatter(x=xs, y=np.maximum(xs / ke, 0), mode="lines", name=f"P/B théorique (Ke = {ke:.1f} %)",
-                        line=dict(color=BPCE_SLATE, dash="dash"))
-        palette = [BPCE_NAVY, BPCE_RED, BPCE_SLATE, "#E8A0A8", "#7A8B99", "#E0A100", "#2E8B57"]
+                        line=dict(color=SLATE, dash="dash"))
+        palette = [PRUNE, ACCENT, MAUVE, SLATE, GOLD, "#2F855A", MIST]
         for k, (cat, grp) in enumerate(v.groupby("category")):
             fig.add_scatter(
                 x=grp["roe"], y=grp["pb"], mode="markers+text", name=cat, text=grp["ticker"],
@@ -2039,7 +2215,7 @@ def module_ma(ctx: dict) -> None:
         fig.update_xaxes(title_text="Return on Equity (%)")
         fig.update_yaxes(title_text="Price-to-Book (x)")
         st.plotly_chart(style_fig(fig, 540, "Valorisation vs Rentabilité — taille des bulles = capitalisation"),
-                        width="stretch", config=PLOTLY_CONFIG)
+                        width="stretch", theme=None, config=PLOTLY_CONFIG)
         st.caption("Les sociétés situées sous la droite théorique affichent une décote relative à leur "
                    "rentabilité : candidates prioritaires à une analyse approfondie.")
 
@@ -2053,13 +2229,13 @@ def module_ma(ctx: dict) -> None:
         t = selected_target(ctx, view)
         render_cards([
             kpi_card("Capitalisation", f"{t['market_cap_usd_m']:,.0f} M$".replace(",", " "), t["source"]),
-            kpi_card("P/E", _fmt(t["pe"], "{:.1f}x"), "Price / Earnings", variant="navy"),
-            kpi_card("P/B", _fmt(t["pb"], "{:.2f}x"), f"Théorique : {_fmt(t['pb_fair'], '{:.2f}x')}", variant="navy"),
+            kpi_card("P/E", _fmt(t["pe"], "{:.1f}x"), "Price / Earnings", variant="alt"),
+            kpi_card("P/B", _fmt(t["pb"], "{:.2f}x"), f"Théorique : {_fmt(t['pb_fair'], '{:.2f}x')}", variant="alt"),
             kpi_card("ROE", _fmt(t["roe"], "{:.1f} %"), "Rentabilité des fonds propres"),
             kpi_card("Score d'attractivité", f"{t['attractiveness']:.0f}/100", "ROE, décote, rendement"),
         ])
         st.write("")
-        st.info(target_comment(t), icon="💡")
+        st.info(target_comment(t), icon=":material/insights:")
 
 
 def target_comment(t: dict) -> str:
@@ -2121,7 +2297,8 @@ def module_sim(ctx: dict) -> None:
     ensure_sim_state(ctx, t)
     hero("Module 4 • Simulateur Financier Post-Acquisition",
          f"M&A Deal Modeler — {t['name']}",
-         f"{flag_emoji(p['iso2'])} {p['name']} • Projections P&L, TRI, ROI & Payback • Hypothèses modifiables")
+         f"{p['name']} • Projections P&L, TRI, ROI & Payback • Hypothèses modifiables",
+         tape=market_tape(ctx))
 
     left, right = st.columns([1, 2.4], gap="large")
     with left:
@@ -2135,7 +2312,7 @@ def module_sim(ctx: dict) -> None:
         st.slider("Synergies de coûts (% des charges)", 0.0, 30.0, step=0.5, key="sim_cost_syn")
         st.slider("Taux d'intérêt du financement (%)", 0.0, 15.0, step=0.1, key="sim_rate")
         st.slider("Horizon d'investissement (années)", 3, 10, key="sim_horizon")
-        with st.expander("⚙️ Hypothèses opérationnelles avancées"):
+        with st.expander("Hypothèses opérationnelles avancées", icon=":material/tune:"):
             st.number_input(f"PNB initial de la cible ({cur}M)", min_value=1.0, step=10.0, format="%.0f", key="sim_pnb0")
             st.slider("Croissance organique nominale (%)", 0.0, 15.0, step=0.1, key="sim_growth")
             st.slider("Coefficient d'exploitation (%)", 35, 85, key="sim_cir")
@@ -2143,7 +2320,7 @@ def module_sim(ctx: dict) -> None:
             st.slider("Taux d'imposition (%)", 0.0, 45.0, step=0.5, key="sim_tax")
             st.slider("Multiple de sortie (P/E)", 4.0, 25.0, step=0.5, key="sim_exit_pe")
             st.slider("Taux de distribution à BPCE (%)", 0, 100, step=5, key="sim_payout")
-        st.button("↺ Réinitialiser selon la cible", width="stretch",
+        st.button("Réinitialiser selon la cible", icon=":material/restart_alt:", width="stretch",
                   on_click=ensure_sim_state, args=(ctx, t, True))
 
     params = current_sim_params()
@@ -2155,37 +2332,37 @@ def module_sim(ctx: dict) -> None:
         irr_v = res["irr"]
         render_cards([
             kpi_card("TRI actionnaire", _fmt(irr_v, "{:.1f} %"),
-                     f"Hurdle rate {hurdle:.0f} % • " + ("✅ créateur de valeur" if irr_v and irr_v >= hurdle
-                                                        else "⚠️ sous le seuil"),
+                     f"Hurdle rate {hurdle:.0f} % • " + ("créateur de valeur" if irr_v and irr_v >= hurdle
+                                                        else "sous le seuil"),
                      None if irr_v is None else irr_v - hurdle),
             kpi_card("ROI", _fmt(res["roi"], "{:.0f} %"), f"MOIC {_fmt(res['moic'], '{:.2f}x')}"),
             kpi_card("Payback", _fmt(res["payback"], "{:.1f} ans", "> horizon"), "Flux cumulés actionnaire",
-                     variant="navy"),
+                     variant="alt"),
             kpi_card("Fonds propres investis", f"{res['equity']:,.0f} {cur}M".replace(",", " "),
-                     f"Dette : {res['debt']:,.0f} {cur}M".replace(",", " "), variant="navy"),
+                     f"Dette : {res['debt']:,.0f} {cur}M".replace(",", " "), variant="alt"),
         ])
         st.write("")
-        tabs = st.tabs(["📊 PNB & Résultat net", "📑 P&L projeté", "💶 Flux & création de valeur",
-                        "🧪 Sensibilités"])
+        tabs = st.tabs(["PNB & Résultat net", "P&L projeté", "Flux & création de valeur",
+                        "Sensibilités"])
         with tabs[0]:
             fig = go.Figure()
-            fig.add_bar(x=pl["Année"], y=pl["PNB_organique"], name="PNB organique", marker_color=BPCE_NAVY,
+            fig.add_bar(x=pl["Année"], y=pl["PNB_organique"], name="PNB organique", marker_color=PRUNE,
                         offsetgroup="pnb")
             fig.add_bar(x=pl["Année"], y=pl["Synergies_revenus"], name="Synergies de revenus",
-                        marker_color=BPCE_SLATE, offsetgroup="pnb", base=pl["PNB_organique"])
+                        marker_color=SLATE, offsetgroup="pnb", base=pl["PNB_organique"])
             rn_base = pl["Resultat_net_standalone"].clip(lower=0)
             uplift = pl["Resultat_net"] - pl["Resultat_net_standalone"]
             fig.add_bar(x=pl["Année"], y=pl["Resultat_net_standalone"], name="Résultat net stand-alone",
-                        marker_color="#E8A0A8", offsetgroup="rn")
+                        marker_color=MAUVE, offsetgroup="rn")
             fig.add_bar(x=pl["Année"], y=uplift, name="Effet deal (synergies − intégration − dette)",
-                        marker_color=BPCE_RED, offsetgroup="rn", base=rn_base)
+                        marker_color=ACCENT, offsetgroup="rn", base=rn_base)
             fig.add_scatter(x=pl["Année"], y=pl["Resultat_net"], name="Résultat net post-synergies",
-                            mode="lines+markers", line=dict(color=BPCE_ANTHRACITE, width=2),
+                            mode="lines+markers", line=dict(color=INK, width=2),
                             marker=dict(size=8))
             fig.update_layout(barmode="group", bargap=0.2)
             fig.update_yaxes(title_text=f"{cur}M")
             st.plotly_chart(style_fig(fig, 460, "Évolution du PNB et du résultat net post-synergies"),
-                            width="stretch", config=PLOTLY_CONFIG)
+                            width="stretch", theme=None, config=PLOTLY_CONFIG)
 
         with tabs[1]:
             table = pl.set_index("Année")[["PNB_organique", "Synergies_revenus", "PNB", "Charges",
@@ -2195,7 +2372,7 @@ def module_sim(ctx: dict) -> None:
                            "dont synergies de coûts", "Coûts d'intégration", "Résultat brut d'exploitation",
                            "Coût du risque", "Frais financiers", "Impôt", "Résultat net", "Coef. exploitation (%)"]
             st.dataframe(table.style.format("{:,.1f}"), width="stretch")
-            st.download_button("⬇️ Exporter le P&L (CSV)", pl.to_csv(index=False).encode("utf-8"),
+            st.download_button("Exporter le P&L (CSV)", pl.to_csv(index=False).encode("utf-8"), icon=":material/download:",
                                file_name=f"pl_{t['ticker']}.csv", mime="text/csv")
 
         with tabs[2]:
@@ -2203,22 +2380,22 @@ def module_sim(ctx: dict) -> None:
             years = [f"A{i}" for i in range(len(cf))]
             fig = go.Figure()
             fig.add_bar(x=years, y=cf, name="Flux actionnaire BPCE",
-                        marker_color=[BPCE_RED if v < 0 else BPCE_NAVY for v in cf])
+                        marker_color=[ACCENT if v < 0 else PRUNE for v in cf])
             fig.add_scatter(x=years, y=np.cumsum(cf), name="Flux cumulés", mode="lines+markers",
-                            line=dict(color=BPCE_SLATE, width=3))
-            fig.add_hline(y=0, line_color="#B0BCC7")
+                            line=dict(color=SLATE, width=3))
+            fig.add_hline(y=0, line_color=MIST)
             fig.update_yaxes(title_text=f"{cur}M")
             st.plotly_chart(style_fig(fig, 420, "Flux de trésorerie actionnaire (dividendes + sortie − dette)"),
-                            width="stretch", config=PLOTLY_CONFIG)
+                            width="stretch", theme=None, config=PLOTLY_CONFIG)
 
         with tabs[3]:
             grid = sensitivity_grid(params)
             fig = go.Figure(go.Heatmap(
                 z=grid.values, x=grid.columns, y=grid.index, text=np.round(grid.values, 1),
-                texttemplate="%{text} %", colorscale=[[0, "#F5C2CA"], [0.5, "#FFFFFF"], [1, "#BFD3E2"]],
+                texttemplate="%{text} %", colorscale=[[0, "#F3D0CC"], [0.5, "#FFFFFF"], [1, "#D9C2D5"]],
                 zmid=hurdle, colorbar=dict(title="TRI %")))
             st.plotly_chart(style_fig(fig, 420, "Sensibilité du TRI : synergies de coûts × multiple de sortie"),
-                            width="stretch", config=PLOTLY_CONFIG)
+                            width="stretch", theme=None, config=PLOTLY_CONFIG)
     st.session_state["sim_result"] = res
 
 
@@ -2253,22 +2430,23 @@ def module_pdf(ctx: dict) -> None:
 
     hero("Module 5 • Générateur de Note de Synthèse",
          f"Executive Summary PDF — {p['name']}",
-         "ReportLab • Charte Groupe BPCE • 2-3 pages • Header/Footer, pagination et date d'édition")
+         "ReportLab • Charte Groupe BPCE • 2-3 pages • Header/Footer, pagination et date d'édition",
+         tape=market_tape(ctx))
 
     c1, c2 = st.columns([1.6, 1], gap="large")
     with c1:
         section("Aperçu du contenu")
         st.markdown(f"""
 <div class="panel">
-<b style="color:{BPCE_RED}">{reco['verdict']}</b><br/><span style="color:#44525E">{reco['text']}</span>
+<b style="color:{ACCENT}">{reco['verdict']}</b><br/><span style="color:#1F2421">{reco['text']}</span>
 </div>""", unsafe_allow_html=True)
         render_cards([
-            kpi_card("Pays", f"{flag_emoji(p['iso2'])} {p['name']}", ctx["region"]),
+            kpi_card("Pays", f"{p['name']}", ctx["region"]),
             kpi_card("Risque composite", f"{ctx['risk']['composite']:.0f}/100", risk_level(ctx["risk"]["composite"]),
-                     variant="navy"),
+                     variant="alt"),
             kpi_card("Cible", t["ticker"], t["name"][:38]),
             kpi_card("TRI simulé", _fmt(sim["irr"], "{:.1f} %"), f"Horizon {sim['params']['horizon']:.0f} ans",
-                     variant="navy"),
+                     variant="alt"),
         ])
         st.write("")
         st.markdown("""
@@ -2285,7 +2463,7 @@ def module_pdf(ctx: dict) -> None:
         if not REPORTLAB_OK:
             st.error("ReportLab n'est pas installé : `pip install reportlab`.")
             return
-        if st.button("🖨️ Générer la note de synthèse", type="primary", width="stretch"):
+        if st.button("Générer la note de synthèse", type="primary", icon=":material/picture_as_pdf:", width="stretch"):
             payload = dict(
                 iso3=iso3, country=p["name"], region=ctx["region"], latest=ctx["latest"],
                 region_avg=ctx["avg"], risk=ctx["risk"], market=ctx["market"],
@@ -2300,11 +2478,11 @@ def module_pdf(ctx: dict) -> None:
                     st.session_state["pdf_bytes"] = generate_pdf_report(payload)
                     st.session_state["pdf_name"] = (f"BPCE_Note_Synthese_{iso3}_{t['ticker']}_"
                                                     f"{datetime.now():%Y%m%d}.pdf")
-                st.toast("Note de synthèse générée", icon="📄")
+                st.toast("Note de synthèse générée", icon=":material/task_alt:")
             except Exception as err:  # robustesse : ne jamais casser l'interface
                 st.error(f"Échec de génération du PDF : {err}")
         if st.session_state.get("pdf_bytes"):
-            st.download_button("⬇️ Télécharger le PDF", st.session_state["pdf_bytes"],
+            st.download_button("Télécharger le PDF", st.session_state["pdf_bytes"], icon=":material/download:",
                                file_name=st.session_state["pdf_name"], mime="application/pdf",
                                width="stretch")
             st.success(f"Document prêt ({len(st.session_state['pdf_bytes']) / 1024:.0f} Ko).")
@@ -2315,6 +2493,8 @@ def module_pdf(ctx: dict) -> None:
 # =============================================================================
 
 def main() -> None:
+    if ensure_theme_config():
+        st.toast("Thème Groupe BPCE installé (.streamlit/config.toml)", icon=":material/palette:")
     inject_css()
     persist_widget_state()
     region, iso3, module = render_sidebar()
