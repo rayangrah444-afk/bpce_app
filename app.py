@@ -312,10 +312,11 @@ def inject_css() -> None:
             background: rgba(255,255,255,.05) !important; border: 1px solid rgba(255,255,255,.16) !important;
             border-radius: 10px;
         }}
-        [data-testid="stSidebar"] .stButton > button {{
+        [data-testid="stSidebar"] .stButton > button, [data-testid="stSidebar"] .stDownloadButton > button {{
             background: rgba(255,255,255,.08) !important; border: 1px solid rgba(255,255,255,.3) !important;
         }}
-        [data-testid="stSidebar"] .stButton > button:hover {{ background: rgba(255,255,255,.16) !important; }}
+        [data-testid="stSidebar"] .stButton > button:hover,
+        [data-testid="stSidebar"] .stDownloadButton > button:hover {{ background: rgba(255,255,255,.16) !important; }}
         [data-testid="stSidebar"] hr {{ border-color: rgba(255,255,255,.14) !important; }}
         [data-testid="stSidebarCollapseButton"] svg, [data-testid="stSidebarHeader"] svg {{ fill: {WHITE} !important; }}
 
@@ -1771,8 +1772,23 @@ def render_sidebar() -> tuple[str, str, str]:
                 st.session_state["api_status"] = {}
                 st.session_state["toasted"] = set()
                 st.rerun()
+        guide = user_guide_bytes()
+        if guide:
+            st.download_button("Guide utilisateur (PDF)", guide, icon=":material/menu_book:",
+                               file_name="Guide_utilisateur_BPCE_Strategy_Hub.pdf",
+                               mime="application/pdf", width="stretch")
         st.caption(f"© Groupe BPCE — {datetime.now():%Y} • Usage interne")
     return region, iso3, module
+
+
+@st.cache_data(show_spinner=False)
+def user_guide_bytes() -> bytes | None:
+    """Mémorandum « Guide utilisateur » (module guide_utilisateur.py, facultatif)."""
+    try:
+        from guide_utilisateur import generate_user_guide_pdf
+        return generate_user_guide_pdf()
+    except Exception:  # module absent ou ReportLab indisponible : bouton masqué
+        return None
 
 
 # ---------- Module 1 : PESTEL & Macro -------------------------------------------
